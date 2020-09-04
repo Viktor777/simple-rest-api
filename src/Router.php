@@ -6,111 +6,129 @@ use WP_REST_Request;
 use WP_REST_Response;
 use WP_Error;
 
-class Router {
-
-    protected $_namespace;
+/**
+ * Class Router
+ * @package Simple_REST_API
+ */
+class Router
+{
+    protected $namespace;
 
     /**
      * @var Route[]
      */
-    protected $_routes = [];
+    protected $routes = [];
 
-    protected $_before = [];
-    protected $_after = [];
+    protected $before = [];
+    protected $after = [];
 
-    protected $_options = [
+    protected $options = [
         'etag' => false,
     ];
 
     /**
      * @param string $namespace The first URL segment after core prefix. Should be unique to your package/plugin.
+     * @param array  $options
      */
-    public function __construct( $namespace, $options = [] ) {
+    public function __construct( $namespace, array $options = [] )
+    {
         $namespace = trim( $namespace, '/' );
-        $this->_namespace = $namespace;
-        $this->_options = wp_parse_args( $options, $this->_options );
+        $this->namespace = $namespace;
+        $this->options = wp_parse_args( $options, $this->options );
 
         add_action( 'rest_api_init', function() {
-            $this->_register();
+            $this->register();
         } );
     }
 
     /**
      * Maps a GET request to a callable.
      *
-     * @param string $path Matched route path
+     * @param string   $path Matched route path
      * @param callable $callback Callback that returns the response when matched
      * @return Route
      */
-    public function get( $path, callable $callback ) {
+    public function get( $path, callable $callback )
+    {
         $route = new Route( 'GET', $path, $callback );
-        $this->_routes[] = $route;
+        $this->routes[] = $route;
+
         return $route;
     }
 
     /**
      * Maps a POST request to a callable.
      *
-     * @param string $path Matched route path
+     * @param string   $path Matched route path
      * @param callable $callback Callback that returns the response when matched
      * @return Route
      */
-    public function post( $path, callable $callback ) {
+    public function post( $path, callable $callback )
+    {
         $route = new Route( 'POST', $path, $callback );
-        $this->_routes[] = $route;
+        $this->routes[] = $route;
+
         return $route;
     }
 
     /**
      * Maps a PUT request to a callable.
      *
-     * @param string $path Matched route path
+     * @param string   $path Matched route path
      * @param callable $callback Callback that returns the response when matched
      * @return Route
      */
-    public function put( $path, callable $callback ) {
+    public function put( $path, callable $callback )
+    {
         $route = new Route( 'PUT', $path, $callback );
-        $this->_routes[] = $route;
+        $this->routes[] = $route;
+
         return $route;
     }
 
     /**
      * Maps a PATCH request to a callable.
      *
-     * @param string $path Matched route path
+     * @param string   $path Matched route path
      * @param callable $callback Callback that returns the response when matched
      * @return Route
      */
-    public function patch( $path, callable $callback ) {
+    public function patch( $path, callable $callback )
+    {
         $route = new Route( 'PATCH', $path, $callback );
-        $this->_routes[] = $route;
+        $this->routes[] = $route;
+
         return $route;
     }
 
     /**
      * Maps a DELETE request to a callable.
      *
-     * @param string $path Matched route path
+     * @param string   $path Matched route path
      * @param callable $callback Callback that returns the response when matched
      * @return Route
      */
-    public function delete( $path, callable $callback ) {
+    public function delete( $path, callable $callback )
+    {
         $route = new Route( 'DELETE', $path, $callback );
-        $this->_routes[] = $route;
+        $this->routes[] = $route;
+
         return $route;
     }
 
     /**
      * Maps a request to a callable.
      *
-     * @param string $method Request method
-     * @param string $path Matched route path
+     * @param string   $method Request method
+     * @param string   $path Matched route path
      * @param callable $callback Callback that returns the response when matched
      * @return Route
      */
-    public function match( $method, $path, callable $callback ) {
+    public function match( $method, $path, callable $callback )
+    {
         $route = new Route( mb_strtoupper( $method ), $path, $callback );
-        $this->_routes[] = $route;
+        $this->routes[] = $route;
+
         return $route;
     }
 
@@ -121,8 +139,10 @@ class Router {
      *
      * @return Router $this The current instance
      */
-    public function before( callable $callback ) {
-        $this->_before[] = $callback;
+    public function before( callable $callback )
+    {
+        $this->before[] = $callback;
+
         return $this;
     }
 
@@ -133,46 +153,56 @@ class Router {
      *
      * @return Router $this The current instance
      */
-    public function after( callable $callback ) {
-        $this->_after[] = $callback;
+    public function after( callable $callback )
+    {
+        $this->after[] = $callback;
+
         return $this;
     }
 
-    protected function _register() {
-        foreach( $this->_routes as $route ) {
-
-            foreach( $this->_before as $callback ) {
+    protected function register()
+    {
+        foreach ( $this->routes as $route ) {
+            foreach ( $this->before as $callback ) {
                 $route->before( $callback );
             }
 
-            foreach( $this->_after as $callback ) {
+            foreach ( $this->after as $callback ) {
                 $route->after( $callback );
             }
 
             $args = [
-                'methods' => $route->get_method(),
-                'accept_json' => $route->is_accept_json(),
-                'callback' => function( WP_REST_Request $request ) use ( $route ) {
+                'methods'             => $route->get_method(),
+                'accept_json'         => $route->is_accept_json(),
+                'permission_callback' => '__return_true', // @TODO: Create a method.
+                'callback'            => function ( WP_REST_Request $request ) use ( $route ) {
                     $response = $route->execute( $request );
 
                     if ( ! ( $response instanceof WP_Error ) ) {
-                        $this->_maybe_add_etag( $request, $response );
+                        $this->maybe_add_etag( $request, $response );
                     }
+
                     return $response;
                 }
             ];
-            register_rest_route( $this->_namespace, $route->get_path(), $args );
+
+            register_rest_route( $this->namespace, $route->get_path(), $args );
         }
     }
 
-    protected function _maybe_add_etag( WP_REST_Request $request, WP_REST_Response $response ) {
-        if( $this->_options['etag'] && 'GET' === $request->get_method() && 200 == $response->get_status() ) {
+    /**
+     * @param WP_REST_Request  $request
+     * @param WP_REST_Response $response
+     */
+    protected function maybe_add_etag( WP_REST_Request $request, WP_REST_Response $response )
+    {
+        if ( $this->options['etag'] && 'GET' === $request->get_method() && 200 == $response->get_status() ) {
             $etag = md5( serialize( $response->get_data() ) );
             $response->header( 'Etag', $etag );
 
-            if( $etag && $etag === $request->get_header( 'if_none_match' ) ) {
+            if ( $etag && $etag === $request->get_header( 'if_none_match' ) ) {
                 $response->set_status( 304 ); // Not Modified
-                $response->set_data(null);
+                $response->set_data( null );
             }
         }
     }

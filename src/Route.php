@@ -2,51 +2,81 @@
 
 namespace Simple_REST_API;
 
+use ReflectionException;
 use WP_REST_Request;
 use WP_REST_Response;
 use ReflectionFunction;
 use WP_Error;
 
-class Route {
+/**
+ * Class Route
+ * @package Simple_REST_API
+ */
+class Route
+{
+    protected $path;
+    protected $method;
+    protected $callback;
 
-    protected $_path;
-    protected $_method;
-    protected $_callback;
+    protected $custom_params = [];
 
-    protected $_custom_params = [];
+    protected $accept_json = false;
 
-    protected $_accept_json = false;
+    protected $asserts = [];
+    protected $converts = [];
+    protected $before = [];
+    protected $after = [];
 
-    protected $_asserts = [];
-    protected $_converts = [];
-    protected $_before = [];
-    protected $_after = [];
-
-    public function __construct( $method, $path, callable $callback ) {
-        $this->_method = $method;
+    /**
+     * Route constructor.
+     * @param string $method
+     * @param string $path
+     * @param callable $callback
+     */
+    public function __construct( $method, $path, callable $callback )
+    {
+        $this->method = $method;
 
         if ( 0 !== mb_strpos( $path, '/' ) ) {
             $path = '/' . $path;
         }
 
-        $this->_path = $path;
-        $this->_callback = $callback;
+        $this->path = $path;
+        $this->callback = $callback;
     }
 
-    public function get_method() {
-        return $this->_method;
+    /**
+     * @return mixed
+     */
+    public function get_method()
+    {
+        return $this->method;
     }
 
-    public function get_path() {
-        return $this->_replace_path_custom_params( $this->_path, $this->_custom_params );
+    /**
+     * @return string
+     */
+    public function get_path()
+    {
+        return $this->replace_path_custom_params( $this->path, $this->custom_params );
     }
 
-    public function is_accept_json() {
-        return $this->_accept_json;
+    /**
+     * @return bool
+     */
+    public function is_accept_json()
+    {
+        return $this->accept_json;
     }
 
-    public function accept_json( $accept = true )  {
-        $this->_accept_json = boolval( $accept );
+    /**
+     * @param bool $accept
+     * @return $this
+     */
+    public function accept_json( $accept = true )
+    {
+        $this->accept_json = boolval( $accept );
+
         return $this;
     }
 
@@ -57,8 +87,10 @@ class Route {
      *
      * @return Route $this The current instance
      */
-    public function before( callable $callback ) {
-        $this->_before[] = $callback;
+    public function before( callable $callback )
+    {
+        $this->before[] = $callback;
+
         return $this;
     }
 
@@ -69,8 +101,10 @@ class Route {
      *
      * @return Route $this The current instance
      */
-    public function after( callable $callback ) {
-        $this->_after[] = $callback;
+    public function after( callable $callback )
+    {
+        $this->after[] = $callback;
+
         return $this;
     }
 
@@ -82,8 +116,10 @@ class Route {
      *
      * @return Route $this The current instance
      */
-    public function assert( $variable, $pattern ) {
-        $this->_asserts[ $variable ] = $pattern;
+    public function assert( $variable, $pattern )
+    {
+        $this->asserts[ $variable ] = $pattern;
+
         return $this;
     }
 
@@ -95,29 +131,37 @@ class Route {
      *
      * @return Route $this The current instance
      */
-    public function convert( $variable, callable $callback ) {
-        $this->_converts[ $variable ] = $callback;
+    public function convert( $variable, callable $callback )
+    {
+        $this->converts[ $variable ] = $callback;
+
         return $this;
     }
 
-    public function execute( WP_REST_Request $request ) {
+    /**
+     * @param WP_REST_Request $request
+     * @return mixed|WP_Error|WP_REST_Response
+     * @throws ReflectionException
+     */
+    public function execute( WP_REST_Request $request )
+    {
         $response = new WP_REST_Response();
 
-        foreach ( $this->_converts as $key => $convert_callback ) {
-            if( in_array( $key, array_values( $this->_custom_params ) ) ) {
+        foreach ( $this->converts as $key => $convert_callback ) {
+            if ( in_array( $key, array_values( $this->custom_params ) ) ) {
                 $url_params = $request->get_url_params();
-                $url_params[ $key ] = $this->_execute_callback( $convert_callback, $request, $response );
+                $url_params[ $key ] = $this->execute_callback( $convert_callback, $request, $response );
                 $request->set_url_params( $url_params );
             }
         }
 
-        foreach ( $this->_before as $before_callback ) {
-            $this->_execute_callback( $before_callback, $request, $response );
+        foreach ( $this->before as $before_callback ) {
+            $this->execute_callback( $before_callback, $request, $response );
         }
 
-        $result = $this->_execute_callback( $this->_callback, $request, $response );
+        $result = $this->execute_callback( $this->callback, $request, $response );
 
-        if( $result ) {
+        if ( $result ) {
             if ( ! ( $result instanceof WP_REST_Response || $result instanceof WP_Error ) ) {
                 $response->set_data( $result );
             } else {
@@ -126,29 +170,36 @@ class Route {
         }
 
         if ( ! ( $response instanceof WP_Error ) ) {
-            foreach ( $this->_after as $after_callback ) {
-                $this->_execute_callback( $after_callback, $request, $response );
+            foreach ( $this->after as $after_callback ) {
+                $this->execute_callback( $after_callback, $request, $response );
             }
         }
 
         return $response;
     }
 
-    protected function _execute_callback( callable $callback, WP_REST_Request $request, WP_REST_Response $response ) {
+    /**
+     * @param callable         $callback
+     * @param WP_REST_Request  $request
+     * @param WP_REST_Response $response
+     * @return mixed
+     * @throws ReflectionException
+     */
+    protected function execute_callback( callable $callback, WP_REST_Request $request, WP_REST_Response $response )
+    {
         $reflection = new ReflectionFunction( $callback );
         $reflection_parameters = $reflection->getParameters();
 
         $args = [];
+
         foreach ( $reflection_parameters as $reflection_parameter ) {
             $name = $reflection_parameter->getName();
 
             if ( 'request' == $name ) {
                 $args[ $name ] = $request;
-            }
-            elseif ( 'response' == $name ) {
+            } elseif ( 'response' == $name ) {
                 $args[ $name ] = $response;
-            }
-            elseif ( in_array( $name, array_values( $this->_custom_params ) ) ) {
+            } elseif ( in_array( $name, array_values( $this->custom_params ) ) ) {
                 $url_params = $request->get_url_params();
                 $args[ $name ] = $url_params[ $name ];
             }
@@ -157,24 +208,35 @@ class Route {
         return call_user_func_array( $callback, $args );
     }
 
-    protected function _replace_path_custom_params( $path, &$params ) {
+    /**
+     * @param string $path
+     * @param array  $params
+     * @return string
+     */
+    protected function replace_path_custom_params( $path, &$params )
+    {
         $params = [];
         $matches = null;
-        if ( preg_match_all( '/\{([a-zA-z0-9]+)\}/i', $path, $matches ) ) {
 
+        if ( preg_match_all( '/\{([a-zA-z0-9]+)\}/i', $path, $matches ) ) {
             foreach ( $matches[1] as $param ) {
                 $path_parts = explode( '{' . $param . '}', $path );
 
                 $index = 1;
-                if( count( $path_parts ) > 0 && preg_match_all( '/[^\\\\](\()/i', $path_parts[0], $groups ) ) {
+
+                if (
+                    count( $path_parts ) > 0 &&
+                    preg_match_all( '/[^\\\\](\()/i', $path_parts[0], $groups )
+                ) {
                     $index = count( $groups[1] ) + 1;
                 }
 
                 $params[ $index ] = $param;
-                $pattern = array_key_exists( $param, $this->_asserts ) ? $this->_asserts[ $param ] : '[^/]+';
+                $pattern = array_key_exists( $param, $this->asserts ) ? $this->asserts[ $param ] : '[^/]+';
                 $path = implode( '(?P<' . $param . '>' . $pattern . ')', $path_parts );
             }
         }
+
         return $path;
     }
 }
